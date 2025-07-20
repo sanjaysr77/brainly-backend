@@ -32,6 +32,7 @@ const ContentSchema = new Schema({
     tags: [{type: ObjectId, ref: 'Tag'}],
     type: String,
     userId: {type: ObjectId, ref: 'User', required: true },
+    tagname: [String]
 })
 
 const LinkSchema = new Schema({
