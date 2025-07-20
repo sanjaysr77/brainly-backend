@@ -1,7 +1,7 @@
 import express from "express";
 import { random } from "./utils";
 import jwt from "jsonwebtoken";
-import { ContentModel, LinkModel, UserModel } from "./db";
+import { ContentModel, LinkModel, TagModel, UserModel } from "./db";
 import { JWT_PASSWORD } from "./config";
 import { userMiddleware } from "./middleware";
 import cors from "cors";
@@ -57,21 +57,39 @@ app.post("/api/v1/signin", async (req, res) => {
 })
 
 app.post("/api/v1/content", userMiddleware, async (req, res) => {
-    const link = req.body.link;
-    const type = req.body.type;
-    await ContentModel.create({
-        link,
-        type,
-        title: req.body.title,
-        userId: req.userId,
-        tags: []
-    })
+  try {
+    const { link, type, title, tags = [] } = req.body;
+
+    const tagIds = [];
+
+    for (const tagName of tags) {
+      let tag = await TagModel.findOne({ name: tagName });
+
+      if (!tag) {
+        tag = await TagModel.create({ name: tagName });
+      }
+
+      tagIds.push(tag._id);
+    }
+
+    const content = await ContentModel.create({
+      link,
+      type,
+      title,
+      userId: req.userId,
+      tags: tagIds
+    });
 
     res.json({
-        message: "Content added"
-    })
-    
-})
+      message: "Content added",
+      content
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
 
 app.get("/api/v1/content", userMiddleware, async (req, res) => {
     // @ts-ignore
