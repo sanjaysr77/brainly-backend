@@ -78,13 +78,13 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     const userId = req.userId;
     const content = await ContentModel.find({
         userId: userId
-    }).populate("userId", "username password _id") // Just think about how this works, you understand this already.
+    }).populate("userId", "username password _id") //Replaces the userId (which is just an ObjectId) in each content document with the actual user document — but only with the selected fields: username, password, and _id.
     res.json({
         content
     })
 })
 
-app.delete("/api/v1/content", userMiddleware, async (req, res): Promise<void> => {
+app.delete("/api/v1/content", userMiddleware, async (req, res)=> {
     try {
         const contentId = req.body.contentId;
         const userId = req.userId;
