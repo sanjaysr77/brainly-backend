@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config()
-import { JWT_PASSWORD } from "config";
+//import { JWT_PASSWORD } from "config";
 import mongoose, {model, Schema} from "mongoose";
 const ObjectId = mongoose.Types.ObjectId;
 

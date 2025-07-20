@@ -4,11 +4,12 @@ import jwt from "jsonwebtoken";
 import { ContentModel, LinkModel, UserModel } from "./db";
 import { JWT_PASSWORD } from "./config";
 import { userMiddleware } from "./middleware";
-//import cors from "cors";
+import cors from "cors";
 
 const app = express();
 app.use(express.json());
-//app.use(cors());
+app.use(cors())
+
 
 app.post("/api/v1/signup", async (req, res) => {
     // TODO: zod validation , hash the password
@@ -24,6 +25,7 @@ app.post("/api/v1/signup", async (req, res) => {
         res.json({
             message: "User signed up"
         })
+        console.log("Signed Up")
     } catch(e) {
         res.status(411).json({
             message: "User already exists"
@@ -82,18 +84,31 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     })
 })
 
-app.delete("/api/v1/content", userMiddleware, async (req, res) => {
-    const contentId = req.body.contentId;
+app.delete("/api/v1/content", userMiddleware, async (req, res): Promise<void> => {
+    try {
+        const contentId = req.body.contentId;
+        const userId = req.userId;
 
-    await ContentModel.deleteMany({
-        _id: contentId,
-        userId: req.userId
-    })
+        if (!contentId) {
+            res.status(400).json({ message: "contentId is required" });
+            return; // ✅ return to stop further execution
+        }
 
-    res.json({
-        message: "Deleted"
-    })
-})
+        const result = await ContentModel.deleteOne({ _id: contentId, userId });
+
+        if (result.deletedCount === 0) {
+            res.status(404).json({ message: "Content not found or not authorized" });
+            return; // ✅ return to stop further execution
+        }
+
+        res.json({ message: "Deleted successfully" });
+    } catch (error) {
+        console.error("Delete error:", error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: "Server error" });
+        }
+    }
+});
 
 app.post("/api/v1/brain/share", userMiddleware, async (req, res) => {
     const share = req.body.share;
