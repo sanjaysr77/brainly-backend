@@ -5,11 +5,19 @@ import { ContentModel, LinkModel, TagModel, UserModel } from "./db";
 import { JWT_PASSWORD } from "./config";
 import { userMiddleware } from "./middleware";
 import cors from "cors";
+import { Pinecone } from '@pinecone-database/pinecone';
+import { PineconeStore } from '@langchain/community/vectorstores/pinecone';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import 'dotenv/config';
+import { Document } from "langchain/document";
 
 const app = express();
 app.use(express.json());
 app.use(cors())
 
+const pinecone = new Pinecone();
+const index = pinecone.Index(process.env.PINECONE_INDEX_NAME!);
+const embeddings = new OpenAIEmbeddings();
 
 app.post("/api/v1/signup", async (req, res) => {
     // TODO: zod validation , hash the password
@@ -20,13 +28,13 @@ app.post("/api/v1/signup", async (req, res) => {
         await UserModel.create({
             username: username,
             password: password
-        }) 
+        })
 
         res.json({
             message: "User signed up"
         })
         console.log("Signed Up")
-    } catch(e) {
+    } catch (e) {
         res.status(411).json({
             message: "User already exists"
         })
@@ -61,7 +69,7 @@ app.post("/api/v1/content", userMiddleware, async (req, res) => {
     const { link, type, title, tags = [] } = req.body;
 
     const tagIds = [];
-    const tagNames = []
+    const tagNames = [];
 
     for (const tagName of tags) {
       let tag = await TagModel.findOne({ name: tagName });
@@ -71,29 +79,53 @@ app.post("/api/v1/content", userMiddleware, async (req, res) => {
       }
 
       tagIds.push(tag._id);
-      tagNames.push(tag.name)
-      //console.log(tag.name)
+      tagNames.push(tag.name);
     }
-    
+
     const content = await ContentModel.create({
       link,
       type,
       title,
       userId: req.userId,
       tags: tagIds,
-      tagname: tagNames
+      tagname: tagNames,
+    });
+
+    const combinedText = `${title}\n${type}\n${tagNames.join(", ")}\n${link}`;
+
+    // Create LangChain document with metadata
+    const doc = new Document({
+      pageContent: combinedText,
+      metadata: {
+        contentId: content._id.toString(),
+        userId: req.userId,
+        title,
+        type,
+        link,
+        tags: tagNames,
+      },
+    });
+
+    // Connect to existing Pinecone index
+    const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
+      pineconeIndex: index,
+      namespace: `user-${req.userId}`,
+    });
+
+    // Add document with custom vector ID
+    await vectorStore.addDocuments([doc], {
+      ids: [content._id.toString()],
     });
 
     res.json({
       message: "Content added",
-      content
+      content,
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong" });
   }
 });
-
 
 app.get("/api/v1/content", userMiddleware, async (req, res) => {
     // @ts-ignore
@@ -106,7 +138,43 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     })
 })
 
-app.delete("/api/v1/content", userMiddleware, async (req, res)=> {
+app.post("/api/v1/query", userMiddleware, async (req, res) => {
+  try {
+    const { query } = req.body;
+
+    // 1. Create embedding from query
+    const embeddings = new OpenAIEmbeddings();
+    const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
+      pineconeIndex: index,
+      namespace: `user-${req.userId}`,
+    });
+
+    // 2. Perform similarity search WITH SCORE
+    const resultsWithScores = await vectorStore.similaritySearchWithScore(query, 3); // top 5 with scores
+
+    // 3. Sort by score DESC (higher = more relevant)
+    const sortedResults = resultsWithScores.sort((a, b) => b[1] - a[1]);
+
+    // 4. Extract ordered content IDs
+    const contentIds = sortedResults.map(([doc]) => doc.metadata.contentId);
+
+    // 5. Fetch all matching content from MongoDB
+    const contents = await ContentModel.find({ _id: { $in: contentIds } });
+
+    // 6. Create a lookup map for ordering
+    const contentMap = new Map(contents.map((doc) => [doc._id.toString(), doc]));
+
+    // 7. Reorder contents based on score ranking
+    const orderedContents = contentIds.map((id) => contentMap.get(id));
+
+    res.json({ results: orderedContents });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not process query" });
+  }
+});
+
+app.delete("/api/v1/content", userMiddleware, async (req, res) => {
     try {
         const contentId = req.body.contentId;
         const userId = req.userId;
@@ -135,25 +203,25 @@ app.delete("/api/v1/content", userMiddleware, async (req, res)=> {
 app.post("/api/v1/brain/share", userMiddleware, async (req, res) => {
     const share = req.body.share;
     if (share) {
-            const existingLink = await LinkModel.findOne({
-                userId: req.userId
-            });
+        const existingLink = await LinkModel.findOne({
+            userId: req.userId
+        });
 
-            if (existingLink) {
-                res.json({
-                    hash: existingLink.hash
-                })
-                return;
-            }
-            const hash = random(10);
-            await LinkModel.create({
-                userId: req.userId,
-                hash: hash
-            })
-
+        if (existingLink) {
             res.json({
-                hash
+                hash: existingLink.hash
             })
+            return;
+        }
+        const hash = random(10);
+        await LinkModel.create({
+            userId: req.userId,
+            hash: hash
+        })
+
+        res.json({
+            hash
+        })
     } else {
         await LinkModel.deleteOne({
             userId: req.userId
@@ -203,5 +271,5 @@ app.get("/api/v1/brain/:shareLink", async (req, res) => {
 })
 
 app.listen(3000, () => {
-    console.log("Running on Port 3000")    
+    console.log("Running on Port 3000")
 })
