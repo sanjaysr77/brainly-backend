@@ -13,7 +13,10 @@ import { Document } from "langchain/document";
 
 const app = express();
 app.use(express.json());
-app.use(cors())
+app.use(cors({
+  origin: 'http://localhost:5174',
+  credentials: true
+}))
 
 const pinecone = new Pinecone();
 const index = pinecone.Index(process.env.PINECONE_INDEX_NAME!);
@@ -138,44 +141,91 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     })
 })
 
-app.post("/api/v1/query", async (req, res) => {
+// app.post("/api/v1/query", async (req, res) => {
+//   try {
+//     const { query } = req.body;
+//     console.log("On Backend: ", query)
+//     console.log("Query from frontend:", req.body.query);
+
+//     // 1. Create embedding from query
+//     const embeddings = new OpenAIEmbeddings();
+//     const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
+//       pineconeIndex: index,
+//       namespace: `user-${req.userId}`,
+//     });
+
+//     // 2. Perform similarity search WITH SCORE
+//     const resultsWithScores = await vectorStore.similaritySearchWithScore(query, 3); // top 5 with scores
+
+//     // 3. Sort by score DESC (higher = more relevant)
+//     const sortedResults = resultsWithScores.sort((a, b) => b[1] - a[1]);
+
+//     // 4. Extract ordered content IDs
+//     const contentIds = sortedResults.map(([doc]) => doc.metadata.contentId);
+
+//     // 5. Fetch all matching content from MongoDB
+//     const contents = await ContentModel.find({ _id: { $in: contentIds } });
+
+//     // 6. Create a lookup map for ordering
+//     const contentMap = new Map(contents.map((doc) => [doc._id.toString(), doc]));
+
+//     // 7. Reorder contents based on score ranking
+//     const orderedContents = contentIds.map((id) => contentMap.get(id));
+
+//     res.json({ results: orderedContents });
+//     console.log(orderedContents)
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Could not process query" });
+//   }
+// });
+
+let lastResultsCache = {}; // TEMP in-memory. Use Redis or DB in production.
+
+app.post("/api/v1/query", userMiddleware, async (req, res) => {
   try {
     const { query } = req.body;
-    console.log("On Backend: ", query)
-    console.log("Query from frontend:", req.body.query);
+    const userId = req.userId;
 
-    // 1. Create embedding from query
     const embeddings = new OpenAIEmbeddings();
     const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
       pineconeIndex: index,
-      namespace: `user-${req.userId}`,
+      namespace: `user-${userId}`,
     });
 
-    // 2. Perform similarity search WITH SCORE
-    const resultsWithScores = await vectorStore.similaritySearchWithScore(query, 3); // top 5 with scores
-
-    // 3. Sort by score DESC (higher = more relevant)
+    const resultsWithScores = await vectorStore.similaritySearchWithScore(query, 3);
     const sortedResults = resultsWithScores.sort((a, b) => b[1] - a[1]);
-
-    // 4. Extract ordered content IDs
     const contentIds = sortedResults.map(([doc]) => doc.metadata.contentId);
-
-    // 5. Fetch all matching content from MongoDB
     const contents = await ContentModel.find({ _id: { $in: contentIds } });
 
-    // 6. Create a lookup map for ordering
-    const contentMap = new Map(contents.map((doc) => [doc._id.toString(), doc]));
+    const contentMap = new Map(contents.map(doc => [doc._id.toString(), doc]));
+    const orderedContents = contentIds.map(id => contentMap.get(id));
 
-    // 7. Reorder contents based on score ranking
-    const orderedContents = contentIds.map((id) => contentMap.get(id));
+    // 🔥 Save in-memory per userId (or use session/Redis)
+    //@ts-ignore
+    lastResultsCache[userId] = orderedContents;
 
-    res.json({ results: orderedContents });
-    console.log(orderedContents)
+    res.status(200).json({ message: "Search complete" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not process query" });
   }
 });
+
+app.get("/api/v1/query", userMiddleware, async (req, res): Promise<void> => {
+  const userId = req.userId;
+  //@ts-ignore
+  const results = lastResultsCache[userId];
+  
+  if (!results) {
+    res.status(404).json({ error: "No previous search results" }); // ❌ don’t return
+    return; // ✅ return early for control flow, not value
+  }
+
+  res.json({ results }); // ✅ fine
+});
+
+
 
 app.delete("/api/v1/content", userMiddleware, async (req, res) => {
     try {
