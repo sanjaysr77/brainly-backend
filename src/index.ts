@@ -138,9 +138,11 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     })
 })
 
-app.post("/api/v1/query", userMiddleware, async (req, res) => {
+app.post("/api/v1/query", async (req, res) => {
   try {
     const { query } = req.body;
+    console.log("On Backend: ", query)
+    console.log("Query from frontend:", req.body.query);
 
     // 1. Create embedding from query
     const embeddings = new OpenAIEmbeddings();
@@ -168,6 +170,7 @@ app.post("/api/v1/query", userMiddleware, async (req, res) => {
     const orderedContents = contentIds.map((id) => contentMap.get(id));
 
     res.json({ results: orderedContents });
+    console.log(orderedContents)
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not process query" });
