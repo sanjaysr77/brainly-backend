@@ -14,7 +14,7 @@ import { Document } from "langchain/document";
 const app = express();
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5174',
+  origin: 'http://localhost:5173',
   credentials: true
 }))
 
@@ -135,7 +135,7 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
     const userId = req.userId;
     const content = await ContentModel.find({
         userId: userId
-    }).populate("userId", "username password _id") //Replaces the userId (which is just an ObjectId) in each content document with the actual user document — but only with the selected fields: username, password, and _id.
+    }).populate("userId", "username password _id") 
     res.json({
         content
     })
@@ -180,7 +180,7 @@ app.get("/api/v1/content", userMiddleware, async (req, res) => {
 //   }
 // });
 
-let lastResultsCache = {}; // TEMP in-memory. Use Redis or DB in production.
+let lastResultsCache = {}; 
 
 app.post("/api/v1/query", userMiddleware, async (req, res) => {
   try {
@@ -201,7 +201,6 @@ app.post("/api/v1/query", userMiddleware, async (req, res) => {
     const contentMap = new Map(contents.map(doc => [doc._id.toString(), doc]));
     const orderedContents = contentIds.map(id => contentMap.get(id));
 
-    // 🔥 Save in-memory per userId (or use session/Redis)
     //@ts-ignore
     lastResultsCache[userId] = orderedContents;
 
@@ -219,10 +218,10 @@ app.get("/api/v1/query", userMiddleware, async (req, res): Promise<void> => {
   
   if (!results) {
     res.status(404).json({ error: "No previous search results" }); // ❌ don’t return
-    return; // ✅ return early for control flow, not value
+    return; 
   }
 
-  res.json({ results }); // ✅ fine
+  res.json({ results }); 
 });
 
 
@@ -234,14 +233,14 @@ app.delete("/api/v1/content", userMiddleware, async (req, res) => {
 
         if (!contentId) {
             res.status(400).json({ message: "contentId is required" });
-            return; // ✅ return to stop further execution
+            return; 
         }
 
         const result = await ContentModel.deleteOne({ _id: contentId, userId });
 
         if (result.deletedCount === 0) {
             res.status(404).json({ message: "Content not found or not authorized" });
-            return; // ✅ return to stop further execution
+            return; 
         }
 
         res.json({ message: "Deleted successfully" });
